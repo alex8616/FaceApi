@@ -1,0 +1,158 @@
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
+from collections import defaultdict
+import sqlite3
+from datetime import datetime
+import calendar
+
+
+class PDFReportes:
+
+    def generar_pdf(self, file_path, data, mes, anio):
+
+        # ----------------------------
+        # MESES
+        # ----------------------------
+        meses = {
+            "Enero": 1, "Febrero": 2, "Marzo": 3,
+            "Abril": 4, "Mayo": 5, "Junio": 6,
+            "Julio": 7, "Agosto": 8, "Septiembre": 9,
+            "Octubre": 10, "Noviembre": 11, "Diciembre": 12
+        }
+
+        mes_num = meses.get(mes, 1)
+
+        # ----------------------------
+        # USUARIOS
+        # ----------------------------
+        conn = sqlite3.connect("personas.db")
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT id, Nombre_Completo, Tiempo, Dni, Cargo FROM personas")
+        usuarios = cursor.fetchall()
+        conn.close()
+
+        usuarios_map = {
+            u[0]: {
+                "nombre": u[1],
+                "tiempo": u[2],
+                "dni": u[3],
+                "cargo": u[4]
+            }
+            for u in usuarios
+        }
+
+        # ----------------------------
+        # AGRUPAR POR PERSONA Y FECHA
+        # ----------------------------
+        agrupado = defaultdict(lambda: defaultdict(list))
+
+        for persona_id, fecha, nombre, hora, tipo in data:
+            agrupado[persona_id][fecha].append(hora)
+
+        # ----------------------------
+        # PDF
+        # ----------------------------
+        doc = SimpleDocTemplate(file_path, pagesize=letter)
+        elements = []
+        styles = getSampleStyleSheet()
+
+        # ----------------------------
+        # POR USUARIO
+        # ----------------------------
+        for persona_id, fechas in agrupado.items():
+
+            user = usuarios_map.get(persona_id, {
+                "nombre": "Desconocido",
+                "tiempo": "MEDIO",
+                "dni": "-",
+                "cargo": "-"
+            })
+
+            title = Paragraph(
+                f"<b>CONTROL DE ASISTENCIA</b><br/>"
+                f"{user['nombre']} | CI: {user['dni']} | {user['cargo']}",
+                styles["Title"]
+            )
+
+            elements.append(title)
+            elements.append(Spacer(1, 10))
+
+            # ----------------------------
+            # TABLA HEADER (como tu imagen)
+            # ----------------------------
+            table_data = [[
+                "FECHA", "DÍA",
+                "INGRESO 1", "FIRMA",
+                "SALIDA 1", "FIRMA",
+                "INGRESO 2", "FIRMA",
+                "SALIDA 2", "FIRMA",
+                "OBS"
+            ]]
+
+            dias_es = {
+                "Monday": "Lunes",
+                "Tuesday": "Martes",
+                "Wednesday": "Miércoles",
+                "Thursday": "Jueves",
+                "Friday": "Viernes",
+                "Saturday": "Sábado",
+                "Sunday": "Domingo"
+            }
+
+            dias_mes = calendar.monthrange(int(anio), mes_num)[1]
+
+            for dia in range(1, dias_mes + 1):
+
+                fecha = f"{anio}-{mes_num:02d}-{dia:02d}"
+
+                try:
+                    dia_nombre = datetime.strptime(fecha, "%Y-%m-%d").strftime("%A")
+                    dia_es = dias_es.get(dia_nombre, dia_nombre)
+                except:
+                    dia_es = "-"
+
+                horas = fechas.get(fecha, [])
+
+                # COMPLETO = 4 MARCAS
+                in1 = horas[0] if len(horas) > 0 else ""
+                out1 = horas[1] if len(horas) > 1 else ""
+                in2 = horas[2] if len(horas) > 2 else ""
+                out2 = horas[3] if len(horas) > 3 else ""
+
+                table_data.append([
+                    f"{dia:02d}/{mes_num:02d}/{anio}",
+                    dia_es,
+                    in1, "",
+                    out1, "",
+                    in2, "",
+                    out2, "",
+                    "OK" if len(horas) >= 2 else ""
+                ])
+
+            # ----------------------------
+            # TABLA STYLE PRO
+            # ----------------------------
+            table = Table(table_data, repeatRows=1)
+
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#8B4513")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 7),
+
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+                 [colors.whitesmoke, colors.lightgrey]),
+            ]))
+
+            elements.append(table)
+            elements.append(PageBreak())
+
+        doc.build(elements)

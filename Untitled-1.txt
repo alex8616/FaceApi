@@ -1,0 +1,6 @@
+venv\Scripts\activate
+pip install reportlab
+
+
+python -c "import reportlab; print('OK')"
+
